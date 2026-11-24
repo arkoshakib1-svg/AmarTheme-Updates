@@ -1,7 +1,9 @@
 {
   "enabled": false,
   "version": "0.0.0",
+  "url": "",
+  "sha256": "",
+  "notes": "No verified AmarTheme installer is published yet. Updates are unavailable until a genuine GitHub Release is published.",
   "download_url": null,
-  "sha256": null,
   "release_notes": "No verified installer published yet."
 }
