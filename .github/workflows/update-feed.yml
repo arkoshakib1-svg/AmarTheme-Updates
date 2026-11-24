@@ -1,4 +1,4 @@
-name: Publish update feed
+name: Publish AmarTheme update feed
 on:
   release:
     types: [published]
@@ -12,28 +12,44 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate and publish manifest
+      - name: Verify stable release and publish manifest
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           python3 - <<'PY'
-          import json, os, re, subprocess, hashlib, tempfile, pathlib, base64
+          import base64, hashlib, json, os, pathlib, re, subprocess, tempfile
           repo = os.environ["REPO"]
           def api(path, *args):
-              return json.loads(subprocess.check_output(["gh","api",path,*args]))
+              return json.loads(subprocess.check_output(["gh","api",path,*args], text=True))
           release = api(f"repos/{repo}/releases/latest")
           tag = release["tag_name"]
           if release["draft"] or release["prerelease"] or not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag):
-              raise SystemExit("Expected stable vX.Y.Z release")
-          asset = next(a for a in release["assets"] if a["name"] == "AmarTheme-Setup.exe" and a["size"] > 0)
+              raise SystemExit("A published stable vX.Y.Z release is required")
+          assets = [a for a in release["assets"]
+                    if a["name"].startswith("AmarTheme") and a["name"].endswith("Setup.exe")
+                    and a["size"] > 1024]
+          if len(assets) != 1:
+              raise SystemExit("Exactly one AmarTheme*Setup.exe asset required in this release")
+          asset = assets[0]
           with tempfile.TemporaryDirectory() as d:
               subprocess.run(["gh","release","download",tag,"--repo",repo,"--pattern",asset["name"],"--dir",d],check=True)
-              with open(pathlib.Path(d)/asset["name"],"rb") as f:
-                  digest = hashlib.file_digest(f,"sha256").hexdigest()
-          data = dict(enabled=True,version=tag[1:],download_url=asset["browser_download_url"],sha256=digest,release_notes=release["body"] or "")
-          path = f"repos/{repo}/contents/latest.json"
-          old = api(path+"?ref=main")
-          content = base64.b64encode((json.dumps(data,indent=2)+"\n").encode()).decode()
-          api(path,"--method","PUT","-f","branch=main","-f","message=Publish update "+tag,"-f","sha="+old["sha"],"-f","content="+content)
+              with open(pathlib.Path(d)/asset["name"],"rb") as stream:
+                  digest = hashlib.file_digest(stream,"sha256").hexdigest()
+          notes = release["body"] or "AmarTheme " + tag + " release"
+          manifest = {
+              "enabled": True,
+              "version": tag[1:],
+              "url": asset["browser_download_url"],
+              "sha256": digest,
+              "notes": notes,
+              "download_url": asset["browser_download_url"],
+              "release_notes": notes
+          }
+          old = api(f"repos/{repo}/contents/latest.json?ref=main")
+          content = base64.b64encode((json.dumps(manifest,indent=2,ensure_ascii=False)+"\n").encode()).decode()
+          api(f"repos/{repo}/contents/latest.json","--method","PUT","-f","branch=main",
+              "-f","message=Publish verified AmarTheme update "+tag,
+              "-f","sha="+old["sha"],"-f","content="+content)
+          print("Published verified update feed for",tag,digest)
           PY
