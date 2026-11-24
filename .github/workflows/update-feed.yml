@@ -3,6 +3,9 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/update-feed.yml"]
 permissions:
   contents: write
 concurrency:
@@ -27,7 +30,7 @@ jobs:
           if release["draft"] or release["prerelease"] or not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag):
               raise SystemExit("A published stable vX.Y.Z release is required")
           assets = [a for a in release["assets"]
-                    if a["name"].startswith("AmarTheme") and a["name"].endswith("Setup.exe")
+                    if re.fullmatch(r"AmarTheme.*Setup(?:\.\d+)?\.exe", a["name"], re.IGNORECASE)
                     and a["size"] > 1024]
           if len(assets) != 1:
               raise SystemExit("Exactly one AmarTheme*Setup.exe asset required in this release")
@@ -36,6 +39,9 @@ jobs:
               subprocess.run(["gh","release","download",tag,"--repo",repo,"--pattern",asset["name"],"--dir",d],check=True)
               with open(pathlib.Path(d)/asset["name"],"rb") as stream:
                   digest = hashlib.file_digest(stream,"sha256").hexdigest()
+          official = asset.get("digest", "")
+          if official and official != "sha256:" + digest:
+              raise SystemExit("GitHub asset digest does not match downloaded installer")
           notes = release["body"] or "AmarTheme " + tag + " release"
           manifest = {
               "enabled": True,
