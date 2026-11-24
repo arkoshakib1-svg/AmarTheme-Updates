@@ -1,0 +1,39 @@
+name: Publish update feed
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: update-feed
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate and publish manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, hashlib, tempfile, pathlib, base64
+          repo = os.environ["REPO"]
+          def api(path, *args):
+              return json.loads(subprocess.check_output(["gh","api",path,*args]))
+          release = api(f"repos/{repo}/releases/latest")
+          tag = release["tag_name"]
+          if release["draft"] or release["prerelease"] or not re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag):
+              raise SystemExit("Expected stable vX.Y.Z release")
+          asset = next(a for a in release["assets"] if a["name"] == "AmarTheme-Setup.exe" and a["size"] > 0)
+          with tempfile.TemporaryDirectory() as d:
+              subprocess.run(["gh","release","download",tag,"--repo",repo,"--pattern",asset["name"],"--dir",d],check=True)
+              with open(pathlib.Path(d)/asset["name"],"rb") as f:
+                  digest = hashlib.file_digest(f,"sha256").hexdigest()
+          data = dict(enabled=True,version=tag[1:],download_url=asset["browser_download_url"],sha256=digest,release_notes=release["body"] or "")
+          path = f"repos/{repo}/contents/latest.json"
+          old = api(path+"?ref=main")
+          content = base64.b64encode((json.dumps(data,indent=2)+"\n").encode()).decode()
+          api(path,"--method","PUT","-f","branch=main","-f","message=Publish update "+tag,"-f","sha="+old["sha"],"-f","content="+content)
+          PY
